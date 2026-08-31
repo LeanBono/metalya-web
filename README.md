@@ -42,3 +42,5 @@ Después de actualizar desde V1, ejecutar `npx prisma db push` para incorporar l
 
 
 
+
+
