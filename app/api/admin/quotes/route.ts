@@ -1,9 +1,179 @@
-import {NextResponse} from 'next/server';
-import {prisma} from '@/lib/prisma';
-import {isAdmin} from '@/lib/auth';
-import {z} from 'zod';
-const schema=z.object({lotId:z.string().optional(),title:z.string().max(120).optional(),location:z.string().max(160).optional(),items:z.array(z.object({materialId:z.string(),kg:z.coerce.number().positive()})).min(1),operatingCost:z.coerce.number().min(0).default(0),offer:z.coerce.number().min(0),targetMarginPct:z.coerce.number().min(0).max(100).default(25),notes:z.string().max(1000).optional()});
-export async function GET(){if(!(await isAdmin()))return NextResponse.json({error:'No autorizado'},{status:401});const quotes=await prisma.quote.findMany({include:{lot:{include:{lead:true,items:{include:{material:true}}}}},orderBy:{createdAt:'desc'},take:100});return NextResponse.json(quotes);}
-export async function POST(req:Request){if(!(await isAdmin()))return NextResponse.json({error:'No autorizado'},{status:401});try{const d=schema.parse(await req.json());const materials=await prisma.material.findMany({where:{id:{in:d.items.map(i=>i.materialId)}}});let buy=0,sell=0;const rows=d.items.map(i=>{const m=materials.find(x=>x.id===i.materialId);if(!m)throw Error('Material');const b=Number(m.buyPrice),s=Number(m.sellPrice);buy+=i.kg*b;sell+=i.kg*s;return {materialId:i.materialId,kg:i.kg,buyPrice:b,sellPrice:s};});const margin=sell-d.offer-d.operatingCost;const marginPct=sell?margin/sell*100:0;
- let lotId=d.lotId; if(!lotId){const lot=await prisma.lot.create({data:{title:d.title||'Nuevo lote',location:d.location||null,items:{create:rows}}});lotId=lot.id;} else {await prisma.lot.update({where:{id:lotId},data:{items:{deleteMany:{},create:rows},title:d.title||undefined,location:d.location||undefined,status:'QUOTED'}})}
- const q=await prisma.quote.create({data:{lotId,totalBuy:buy,estimatedSell:sell,operatingCost:d.operatingCost,offer:d.offer,margin,targetMarginPct:d.targetMarginPct,notes:d.notes||null,status:'DRAFT'}});return NextResponse.json({quote:q,calculated:{buy,sell,maxOffer:Math.max(0,sell-d.operatingCost-sell*d.targetMarginPct/100),profit:margin,marginPct}},{status:201});}catch(e){console.error(e);return NextResponse.json({error:'No se pudo crear la cotización.'},{status:400});}}
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { isAdmin } from '@/lib/auth';
+import { z } from 'zod';
+
+const schema = z.object({
+  lotId: z.string().min(1),
+  items: z
+    .array(
+      z.object({
+        materialId: z.string(),
+        kg: z.coerce.number().positive(),
+      })
+    )
+    .min(1),
+  transportCost: z.coerce.number().min(0).default(0),
+  laborCost: z.coerce.number().min(0).default(0),
+  otherCosts: z.coerce.number().min(0).default(0),
+  targetMargin: z.coerce.number().min(0).max(1).default(0.25),
+});
+
+export async function GET() {
+  if (!(await isAdmin())) {
+    return NextResponse.json(
+      { error: 'No autorizado' },
+      { status: 401 }
+    );
+  }
+
+  const quotes = await prisma.quote.findMany({
+    include: {
+      lot: {
+        include: {
+          lead: true,
+          items: {
+            include: {
+              material: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    take: 100,
+  });
+
+  return NextResponse.json(quotes);
+}
+
+export async function POST(req: Request) {
+  if (!(await isAdmin())) {
+    return NextResponse.json(
+      { error: 'No autorizado' },
+      { status: 401 }
+    );
+  }
+
+  try {
+    const data = schema.parse(await req.json());
+
+    const lot = await prisma.lot.findUnique({
+      where: {
+        id: data.lotId,
+      },
+    });
+
+    if (!lot) {
+      return NextResponse.json(
+        { error: 'Lote no encontrado.' },
+        { status: 404 }
+      );
+    }
+
+    const materials = await prisma.material.findMany({
+      where: {
+        id: {
+          in: data.items.map((item) => item.materialId),
+        },
+        active: true,
+      },
+    });
+
+    let materialValue = 0;
+
+    const rows = data.items.map((item) => {
+      const material = materials.find(
+        (m) => m.id === item.materialId
+      );
+
+      if (!material) {
+        throw new Error('Material no encontrado');
+      }
+
+      const buyPriceKg = Number(material.buyPriceKg);
+      const sellPriceKg = Number(material.sellPriceKg);
+
+      materialValue += item.kg * sellPriceKg;
+
+      return {
+        materialId: item.materialId,
+        kg: item.kg,
+        buyPriceKg,
+        sellPriceKg,
+      };
+    });
+
+    const totalCosts =
+      data.transportCost +
+      data.laborCost +
+      data.otherCosts;
+
+    const maxOffer =
+      materialValue -
+      totalCosts -
+      materialValue * data.targetMargin;
+
+    const estimatedProfit =
+      materialValue -
+      Math.max(0, maxOffer) -
+      totalCosts;
+
+    const estimatedMargin =
+      materialValue > 0
+        ? estimatedProfit / materialValue
+        : 0;
+
+    await prisma.lot.update({
+      where: {
+        id: data.lotId,
+      },
+      data: {
+        status: 'QUOTED',
+        items: {
+          deleteMany: {},
+          create: rows,
+        },
+      },
+    });
+
+    const quote = await prisma.quote.create({
+      data: {
+        lotId: data.lotId,
+        materialValue,
+        transportCost: data.transportCost,
+        laborCost: data.laborCost,
+        otherCosts: data.otherCosts,
+        targetMargin: data.targetMargin,
+        maxOffer: Math.max(0, maxOffer),
+        customerOffer: Math.max(0, maxOffer),
+        estimatedProfit,
+        estimatedMargin,
+        status: 'DRAFT',
+      },
+    });
+
+    return NextResponse.json(
+      {
+        quote,
+        calculated: {
+          materialValue,
+          totalCosts,
+          maxOffer: Math.max(0, maxOffer),
+          estimatedProfit,
+          estimatedMargin,
+        },
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error(error);
+
+    return NextResponse.json(
+      { error: 'No se pudo crear la cotización.' },
+      { status: 400 }
+    );
+  }
+}
