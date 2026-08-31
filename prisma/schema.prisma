@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUOTED
+  SCHEDULED
+  CLOSED
+  LOST
+}
+
+enum LotStatus {
+  NEW
+  REVIEWING
+  QUOTED
+  ACCEPTED
+  SCHEDULED
+  COLLECTED
+  CLOSED
+  CANCELLED
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model Lead {
+  id        String     @id @default(cuid())
+  name      String
+  company   String?
+  email     String?
+  phone     String
+  location  String?
+  service   String
+  message   String?
+  consent   Boolean
+  status    LeadStatus @default(NEW)
+  lots      Lot[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([createdAt])
+  @@index([phone])
+  @@index([status])
+}
+
+model Lot {
+  id          String    @id @default(cuid())
+  leadId      String
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  description String?
+  estimatedKg Float?
+  status      LotStatus @default(NEW)
+  items       LotItem[]
+  quote       Quote?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([leadId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Material {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  buyPriceKg  Float     @default(0)
+  sellPriceKg Float     @default(0)
+  active      Boolean   @default(true)
+  items       LotItem[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model LotItem {
+  id          String   @id @default(cuid())
+  lotId       String
+  materialId  String
+  kg          Float
+  buyPriceKg  Float
+  sellPriceKg Float
+  lot         Lot      @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  material    Material @relation(fields: [materialId], references: [id])
+
+  @@index([lotId])
+  @@index([materialId])
+}
+
+model Quote {
+  id              String      @id @default(cuid())
+  lotId           String      @unique
+  lot             Lot         @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  materialValue   Float       @default(0)
+  transportCost   Float       @default(0)
+  laborCost       Float       @default(0)
+  otherCosts      Float       @default(0)
+  targetMargin    Float       @default(0.25)
+  maxOffer        Float       @default(0)
+  customerOffer   Float       @default(0)
+  estimatedProfit Float       @default(0)
+  estimatedMargin Float       @default(0)
+  realSale        Float?
+  realCost        Float?
+  realProfit      Float?
+  status          QuoteStatus @default(DRAFT)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
