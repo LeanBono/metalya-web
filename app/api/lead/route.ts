@@ -68,8 +68,8 @@ export async function POST(req: Request) {
     console.error(error);
 
     return NextResponse.json(
-      { error: 'No pudimos guardar la solicitud.' },
-      { status: 500 }
+      { error: 'No pudimos guardar la solicitud.', detail: error instanceof Error ? error.message : String(error) }, { status: 500 }
     );
   }
 }
+
