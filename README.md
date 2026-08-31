@@ -38,3 +38,5 @@ Plataforma de compra de chatarra + retiros + limpieza de galpones/fábricas/pyme
 - Los campos `actualSell`, `actualCost` y `actualProfit` permiten registrar resultados reales mediante `PATCH /api/admin/quotes/:id`.
 
 Después de actualizar desde V1, ejecutar `npx prisma db push` para incorporar los nuevos campos.
+
+
