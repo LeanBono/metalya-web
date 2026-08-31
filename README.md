@@ -40,3 +40,5 @@ Plataforma de compra de chatarra + retiros + limpieza de galpones/fábricas/pyme
 Después de actualizar desde V1, ejecutar `npx prisma db push` para incorporar los nuevos campos.
 
 
+
+
